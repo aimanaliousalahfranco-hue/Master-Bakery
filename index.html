@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>Master Bakery: Sweet Records</title>
+    <style>
+        :root { --p-pink: #ffafcc; --p-cream: #fefae0; --p-wood: #d4a373; --p-brown: #603808; }
+        body { margin: 0; background: #faedcd; background-image: radial-gradient(#e9edc9 2px, transparent 2px); background-size: 30px 30px; font-family: 'Segoe UI', sans-serif; overflow: hidden; height: 100vh; display: flex; justify-content: center; align-items: center; }
+
+        /* --- MENÚ PRINCIPAL --- */
+        #main-menu { background: rgba(255, 255, 255, 0.9); padding: 40px; border-radius: 30px; box-shadow: 0 20px 40px rgba(0,0,0,0.1); text-align: center; border: 5px solid white; z-index: 100; min-width: 500px; }
+        h1 { color: var(--p-brown); font-size: 3rem; margin: 0 0 20px 0; }
+        .level-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 15px; margin-top: 20px; }
+        .lvl-card { background: white; border: 3px solid var(--p-pink); border-radius: 15px; padding: 15px; cursor: pointer; transition: 0.3s; }
+        .lvl-card:hover:not(.locked) { transform: translateY(-5px); background: var(--p-pink); color: white; }
+        .record-txt { font-size: 0.7rem; color: #888; display: block; margin-top: 5px; }
+        .locked { opacity: 0.3; filter: grayscale(1); cursor: not-allowed; }
+
+        /* --- ESCENARIO --- */
+        #game-stage { display: none; width: 100vw; height: 100vh; position: relative; }
+        #order-ticket { position: absolute; top: 20px; right: 20px; width: 200px; background: white; border: 1px solid #ddd; padding: 20px; box-shadow: 5px 5px 15px rgba(0,0,0,0.1); z-index: 50; }
+        #cooking-zone { height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; }
+        #bowl { width: 240px; height: 130px; border: 8px solid #fff; border-radius: 0 0 120px 120px; position: relative; overflow: hidden; background: rgba(255, 255, 255, 0.4); box-shadow: 0 10px 20px rgba(0,0,0,0.05); }
+        #liquid { position: absolute; bottom: 0; width: 100%; height: 0%; transition: 0.5s; }
+        
+        #cake-display { display: none; flex-direction: column-reverse; align-items: center; gap: 4px; margin-bottom: 20px; }
+        .cake-layer { height: 35px; border-radius: 10px; border: 2px solid rgba(0,0,0,0.05); }
+
+        .ing-ball { position: absolute; width: 75px; height: 75px; background: white; border-radius: 50%; display: flex; justify-content: center; align-items: center; font-size: 2rem; cursor: pointer; border: 3px solid white; box-shadow: 0 8px 15px rgba(0,0,0,0.1); z-index: 60; }
+        #table { position: absolute; bottom: 0; width: 100%; height: 120px; background: var(--p-wood); border-top: 8px solid #bc8a5f; }
+    </style>
+</head>
+<body>
+
+    <div id="main-menu">
+        <h1>🥐 Master Bakery 🍰</h1>
+        <div class="level-grid" id="grid"></div>
+        <p style="color: var(--p-brown); margin-top: 20px;">¡Bate récords para desbloquear niveles!</p>
+    </div>
+
+    <div id="game-stage">
+        <div id="order-ticket">
+            <h3 style="margin:0; color:#d4a373;">ORDEN #<span id="lvl-n">1</span></h3>
+            <div id="list" style="margin: 15px 0; font-family: monospace;"></div>
+            <div style="font-weight:bold; color:#e76f51;">TIEMPO: <span id="clock">0</span>s</div>
+            <div style="font-size:0.8rem; color:#999;">Fallos: <span id="errs">0</span>/3</div>
+        </div>
+
+        <div id="cooking-zone">
+            <div id="cake-display"></div>
+            <div id="bowl-wrap"><div id="bowl"><div id="liquid"></div></div></div>
+            <h2 id="msg" style="margin-top:20px; color:var(--p-brown);"></h2>
+            <button id="btn" onclick="location.reload()" style="display:none; padding:10px 30px; border-radius:20px; border:none; background:var(--p-brown); color:white; cursor:pointer; font-weight:bold;">CONTINUAR</button>
+        </div>
+        <div id="table"></div>
+    </div>
+
+    <script>
+        const DB = [
+            {id: 'Huevo', ico: '🥚', col: '#ffea00'}, {id: 'Choco', ico: '🍫', col: '#4b2c20'},
+            {id: 'Mora', ico: '🫐', col: '#4361ee'}, {id: 'Leche', ico: '🥛', col: '#edf2fb'},
+            {id: 'Harina', ico: '🌾', col: '#f8f9fa'}, {id: 'Fresa', ico: '🍓', col: '#ef233c'}
+        ];
+
+        let unlocked = parseInt(localStorage.getItem('bakery_unlocked')) || 1;
+        let records = JSON.parse(localStorage.getItem('bakery_records')) || {};
+        let state = { active: false, time: 0, initial: 0, recipe: [], added: [], err: 0 };
+        let loops = [];
+
+        function render() {
+            const g = document.getElementById('grid');
+            g.innerHTML = '';
+            for(let i=1; i<=15; i++) {
+                const lock = i > unlocked;
+                const rec = records[i] ? `${records[i]}s` : '---';
+                g.innerHTML += `
+                    <div class="lvl-card ${lock?'locked':''}" onclick="play(${i}, ${lock})">
+                        <strong>NIVEL ${i}</strong>
+                        <span class="record-txt">🏆 Récord: ${rec}</span>
+                    </div>`;
+            }
+        }
+
+        function play(n, lock) {
+            if(lock) return;
+            document.getElementById('main-menu').style.display = 'none';
+            document.getElementById('game-stage').style.display = 'block';
+            
+            const size = 3 + Math.floor(n/4);
+            const time = Math.max(8, 30 - (n * 1.2));
+
+            state = { active: true, initial: time, time: time, recipe: [...DB].sort(()=>0.5-Math.random()).slice(0, size), added: [], err: 0, lvl: n };
+
+            document.getElementById('lvl-n').innerText = n;
+            document.getElementById('list').innerHTML = state.recipe.map(i => `<div id="r-${i.id}">• ${i.id}</div>`).join('');
+            
+            loops.push(setInterval(() => {
+                state.time -= 0.1;
+                document.getElementById('clock').innerText = Math.ceil(state.time);
+                if(state.time <= 0) end(false);
+            }, 100));
+
+            loops.push(setInterval(spawn, 1100 - (n*30)));
+        }
+
+        function spawn() {
+            if(!state.active) return;
+            const ing = DB[Math.floor(Math.random()*DB.length)];
+            const ball = document.createElement('div');
+            ball.className = 'ing-unit ing-ball';
+            ball.style.backgroundColor = ing.col;
+            ball.innerHTML = ing.ico;
+            ball.style.bottom = '20px';
+            ball.style.left = '-100px';
+            document.getElementById('game-stage').appendChild(ball);
+
+            let x = -100;
+            let m = setInterval(() => {
+                if(!state.active) { clearInterval(m); ball.remove(); return; }
+                x += (4 + state.lvl * 0.3);
+                ball.style.left = x + 'px';
+                if(x > window.innerWidth) { clearInterval(m); ball.remove(); }
+            }, 16);
+
+            ball.onclick = () => {
+                const target = state.recipe.find(r => r.id === ing.id);
+                if(target && !state.added.includes(ing.id)) {
+                    state.added.push(ing.id);
+                    document.getElementById(`r-${ing.id}`).style.textDecoration = 'line-through';
+                    document.getElementById('liquid').style.height = (state.added.length/state.recipe.length*100)+'%';
+                    document.getElementById('liquid').style.background = ing.col;
+                    if(state.added.length === state.recipe.length) end(true);
+                } else {
+                    state.err++;
+                    document.getElementById('errs').innerText = state.err;
+                    if(state.err >= 3) end(false);
+                }
+                ball.remove();
+            };
+        }
+
+        function end(win) {
+            state.active = false;
+            loops.forEach(l => clearInterval(l));
+            if(win) {
+                const total = (state.initial - state.time).toFixed(1);
+                document.getElementById('msg').innerText = `¡ÉXITO! (${total}s)`;
+                if(!records[state.lvl] || total < records[state.lvl]) {
+                    records[state.lvl] = total;
+                    localStorage.setItem('bakery_records', JSON.stringify(records));
+                }
+                if(state.lvl === unlocked && unlocked < 15) {
+                    unlocked++;
+                    localStorage.setItem('bakery_unlocked', unlocked);
+                }
+                cake();
+            } else {
+                document.getElementById('msg').innerText = "¡FALLO!";
+            }
+            document.getElementById('btn').style.display = 'inline-block';
+        }
+
+        function cake() {
+            document.getElementById('bowl-wrap').style.display = 'none';
+            const d = document.getElementById('cake-display');
+            d.style.display = 'flex';
+            state.added.forEach((id, idx) => {
+                const ing = DB.find(i => i.id === id);
+                const l = document.createElement('div');
+                l.className = 'cake-layer';
+                l.style.background = ing.col;
+                l.style.width = (200 - (idx * 20)) + 'px';
+                if(idx === state.added.length-1) l.innerHTML = "🍓";
+                d.appendChild(l);
+            });
+        }
+
+        render();
+    </script>
+</body>
+</html>
